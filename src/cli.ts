@@ -3,6 +3,7 @@ import { Command } from "commander";
 import { writeFileSync } from "node:fs";
 import { scan, SCANNER_VERSION } from "./scan.js";
 import { assertSafeToUpload, redactLocations } from "./manifest/schema.js";
+import { registerWatch } from "./watcher/cli.js";
 
 const program = new Command();
 program
@@ -33,6 +34,8 @@ program
     const { t1, t2, t3 } = manifest.coverage;
     console.error(`[arcdrip] coverage t1=${t1} t2=${t2} t3=${t3} partial=${manifest.partial}`);
   });
+
+registerWatch(program);
 
 program.parseAsync(process.argv).catch((err) => {
   // Local CLI may fail loudly. The GitHub Action wrapper (Week 5) must NOT —
