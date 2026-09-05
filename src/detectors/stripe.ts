@@ -18,6 +18,8 @@ import {
   isDeclaredInPackage,
   propertyChain,
   climbPath,
+  unwrapExpression,
+  isNonExposingUse,
 } from "../analysis/fields.js";
 
 export const PROVIDER = "stripe";
@@ -65,6 +67,7 @@ export const OPERATIONS: Record<string, string> = {
   "paymentMethods.list": "GET /v1/payment_methods",
   "setupIntents.create": "POST /v1/setup_intents",
   "balanceTransactions.list": "GET /v1/balance_transactions",
+  "billingPortal.sessions.create": "POST /v1/billing_portal/sessions",
   "events.retrieve": "GET /v1/events/{id}",
 };
 
@@ -101,7 +104,7 @@ export function detectStripe(project: Project, rootDir: string): ProviderSection
         continue;
       }
 
-      const write = collectWriteFields(firstObjectArg(call));
+      const write = collectWriteFields(firstParamsArg(call));
       const read = collectReadFields(call);
       mergeEntry(
         entries,
@@ -133,9 +136,20 @@ function findApiVersionPin(sf: SourceFile): string | null {
   return null;
 }
 
-/** The request body is the first object-literal argument (Stripe's convention: params object). */
-function firstObjectArg(call: CallExpression): Node | undefined {
-  return call.getArguments().find((a) => Node.isObjectLiteralExpression(a));
+/**
+ * The request body is the first object-typed argument (Stripe's convention:
+ * `create(params)`, `retrieve(id, params)`). We ask the type checker rather
+ * than guessing by position, so `retrieve(customerId)` (a string) is not
+ * mistaken for params and `create(customerData)` (a variable) is followed.
+ */
+function firstParamsArg(call: CallExpression): Node | undefined {
+  for (const arg of call.getArguments()) {
+    const inner = unwrapExpression(arg);
+    if (Node.isObjectLiteralExpression(inner)) return inner;
+    const t = inner.getType();
+    if (t.isObject() && !t.isArray() && t.getCallSignatures().length === 0) return inner;
+  }
+  return undefined;
 }
 
 /**
@@ -145,14 +159,22 @@ function firstObjectArg(call: CallExpression): Node | undefined {
  */
 function detectWebhookHandlers(verifyCall: CallExpression, rootDir: string): Entry[] {
   const out: Entry[] = [];
-  let decl: Node | undefined = verifyCall.getParent();
-  while (decl && (Node.isAwaitExpression(decl) || Node.isParenthesizedExpression(decl))) decl = decl.getParent();
-  if (!decl || !Node.isVariableDeclaration(decl)) return out;
-  const nameNode = decl.getNameNode();
-  if (!Node.isIdentifier(nameNode)) return out;
-  const eventVar = nameNode.getText();
+  let binding: Node | undefined = verifyCall.getParent();
+  while (binding && (Node.isAwaitExpression(binding) || Node.isParenthesizedExpression(binding) || Node.isAsExpression(binding))) {
+    binding = binding.getParent();
+  }
+  if (!binding) return out;
 
-  const fn = decl.getFirstAncestor((a) => Node.isFunctionLikeDeclaration(a) || Node.isSourceFile(a));
+  // const event = constructEvent(...)   OR   let event; ... event = constructEvent(...)
+  let eventVar: string | undefined;
+  if (Node.isVariableDeclaration(binding) && Node.isIdentifier(binding.getNameNode())) {
+    eventVar = binding.getNameNode().getText();
+  } else if (Node.isBinaryExpression(binding) && binding.getOperatorToken().getText() === "=" && Node.isIdentifier(binding.getLeft())) {
+    eventVar = binding.getLeft().getText();
+  }
+  if (!eventVar) return out;
+
+  const fn = binding.getFirstAncestor((a) => Node.isFunctionLikeDeclaration(a) || Node.isSourceFile(a));
   if (!fn) return out;
 
   const switches = fn
@@ -160,22 +182,30 @@ function detectWebhookHandlers(verifyCall: CallExpression, rootDir: string): Ent
     .filter((s) => s.getExpression().getText() === `${eventVar}.type`);
 
   for (const sw of switches) {
-    for (const clause of sw.getClauses()) {
+    const clauses = sw.getClauses();
+    for (let i = 0; i < clauses.length; i++) {
+      const clause = clauses[i];
       if (!Node.isCaseClause(clause)) continue;
       const expr = clause.getExpression();
       if (!Node.isStringLiteral(expr)) continue;
       const eventName = expr.getLiteralValue();
 
-      // Aliases for event.data.object inside this clause.
+      // Fall-through: `case "a": case "b": <body>` — an empty clause shares the next non-empty body.
+      let body: Node = clause;
+      for (let j = i; j < clauses.length && body.getChildSyntaxList()?.getChildCount() === 0; j++) body = clauses[j];
+      if (body.getChildSyntaxList()?.getChildCount() === 0) body = clause;
+
+      // Aliases for event.data.object inside this body (`const sub = event.data.object as Stripe.Subscription`).
       const aliases = new Set<string>();
-      for (const vd of clause.getDescendantsOfKind(SyntaxKind.VariableDeclaration)) {
-        if (vd.getInitializer()?.getText() === `${eventVar}.data.object` && Node.isIdentifier(vd.getNameNode())) {
+      for (const vd of body.getDescendantsOfKind(SyntaxKind.VariableDeclaration)) {
+        const init = vd.getInitializer();
+        if (init && unwrapExpression(init).getText() === `${eventVar}.data.object` && Node.isIdentifier(vd.getNameNode())) {
           aliases.add(vd.getNameNode().getText());
         }
       }
 
       const fields: FieldRef[] = [];
-      for (const pa of clause.getDescendantsOfKind(SyntaxKind.PropertyAccessExpression)) {
+      for (const pa of body.getDescendantsOfKind(SyntaxKind.PropertyAccessExpression)) {
         const chain = propertyChain(pa);
         if (!chain) continue;
         const root = chain.root.getText();
@@ -190,7 +220,7 @@ function detectWebhookHandlers(verifyCall: CallExpression, rootDir: string): Ent
         }
       }
       // Field list is a lower bound: the object may be passed elsewhere. Say so.
-      const complete = !clauseLeaksObject(clause, eventVar, aliases);
+      const complete = !clauseLeaksObject(body, eventVar, aliases);
       out.push(makeEntry("webhook", eventName, fields, 1, complete, loc(clause, rootDir)));
     }
   }
@@ -201,15 +231,26 @@ function detectWebhookHandlers(verifyCall: CallExpression, rootDir: string): Ent
 function clauseLeaksObject(clause: Node, eventVar: string, aliases: Set<string>): boolean {
   for (const id of clause.getDescendantsOfKind(SyntaxKind.Identifier)) {
     if (!aliases.has(id.getText())) continue;
-    const parent = id.getParent();
+    let carrier: Node = id;
+    let parent: Node | undefined = id.getParent();
+    while (parent && (Node.isAsExpression(parent) || Node.isParenthesizedExpression(parent) || Node.isNonNullExpression(parent))) {
+      carrier = parent;
+      parent = carrier.getParent();
+    }
     if (parent && Node.isVariableDeclaration(parent) && parent.getNameNode() === id) continue;
-    if (parent && Node.isPropertyAccessExpression(parent) && parent.getExpression() === id) continue;
+    if (parent && Node.isPropertyAccessExpression(parent) && parent.getExpression() === carrier) continue;
+    if (parent && isNonExposingUse(carrier, parent)) continue;
     return true;
   }
   for (const pa of clause.getDescendantsOfKind(SyntaxKind.PropertyAccessExpression)) {
     if (pa.getText() !== `${eventVar}.data.object`) continue;
-    const parent = pa.getParent();
-    const isRead = parent && Node.isPropertyAccessExpression(parent) && parent.getExpression() === pa;
+    let carrier: Node = pa;
+    let parent: Node | undefined = pa.getParent();
+    while (parent && (Node.isAsExpression(parent) || Node.isParenthesizedExpression(parent) || Node.isNonNullExpression(parent))) {
+      carrier = parent;
+      parent = carrier.getParent();
+    }
+    const isRead = parent && Node.isPropertyAccessExpression(parent) && parent.getExpression() === carrier;
     const isAliasInit = parent && Node.isVariableDeclaration(parent);
     if (!isRead && !isAliasInit) return true;
   }
