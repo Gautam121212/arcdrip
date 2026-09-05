@@ -1,0 +1,44 @@
+name: arcdrip
+description: Detects third-party API changes (Stripe) that affect this repository's code. Read-only; nothing leaves your CI.
+branding: { icon: activity, color: red }
+
+inputs:
+  seed_ref:
+    description: Optional git ref in stripe/openapi to use as the baseline spec on the first run (for replaying a known change). Leave empty in normal use.
+    required: false
+    default: ""
+  include_tests:
+    description: Also scan test files. Off by default.
+    required: false
+    default: "false"
+  budget_seconds:
+    description: Time budget for the scan.
+    required: false
+    default: "300"
+
+runs:
+  using: composite
+  steps:
+    - uses: actions/setup-node@v4
+      with: { node-version: 22 }
+
+    # Snapshots + alert state persist between runs. Best-effort: if the cache is
+    # evicted, the next run re-baselines and alerts resume on the following change.
+    - uses: actions/cache@v4
+      with:
+        path: ${{ runner.temp }}/arcdrip
+        key: arcdrip-stripe-${{ github.repository }}-${{ github.run_id }}
+        restore-keys: arcdrip-stripe-${{ github.repository }}-
+
+    - name: Install arcdrip
+      shell: bash
+      run: cd "${{ github.action_path }}" && npm ci --silent --no-audit --no-fund
+
+    - name: Scan and evaluate
+      shell: bash
+      env:
+        GITHUB_TOKEN: ${{ github.token }}
+        INPUT_SEED_REF: ${{ inputs.seed_ref }}
+        INPUT_INCLUDE_TESTS: ${{ inputs.include_tests }}
+        INPUT_BUDGET_SECONDS: ${{ inputs.budget_seconds }}
+      run: cd "${{ github.action_path }}" && npx tsx src/action/main.ts

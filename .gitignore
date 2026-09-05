@@ -2,5 +2,6 @@ node_modules/
 dist/
 *.manifest.local.json
 .arcdrip/
+.arcdrip-action/
 manifest.local.json
 *.manifest.json

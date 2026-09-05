@@ -54,6 +54,14 @@ Three components. The trust boundary is the most important line in this document
 └────────────────────────────────────────────────────────┘
 ```
 
+> **Implementation note (2026-09-06).** Phase 1 shipped in *standalone mode*: the Action runs the
+> scanner **and** the watcher inside the customer's CI, keeps snapshots and alert state in the
+> Actions cache, and reports via the workflow's own token. There is no hosted service and no
+> upload at all — strictly more private than the design below, at the cost of each repo fetching
+> the spec itself. The hosted watcher (one fetch serving every customer, the cross-customer
+> pattern library) is Phase 2, once there are enough installs to amortise it. The manifest
+> schema, redaction, and outbound checks are unchanged so that move is additive.
+
 ### 2.1 Why pull, not push
 
 The service never contacts GitHub. The Action **pulls** pending alerts on each run (scheduled every 6h, plus on push, plus manual). Consequences:

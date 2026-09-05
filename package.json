@@ -16,12 +16,12 @@
   "dependencies": {
     "commander": "^15.0.0",
     "ts-morph": "^28.0.0",
+    "tsx": "^4.23.13",
     "zod": "^4.5.4"
   },
   "devDependencies": {
     "@types/node": "^26.4.1",
     "stripe": "^22.6.1",
-    "tsx": "^4.23.13",
     "typescript": "^5.9.3",
     "vitest": "^5.0.0"
   }
