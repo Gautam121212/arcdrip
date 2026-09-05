@@ -34,3 +34,35 @@ Anything still unresolved appears as `sdk:<method.path>` with fields intact.
 - A Tier-3 entry never carries field-level data.
 - `fieldsComplete: false` whenever a result flows somewhere we stopped tracking.
 - Any change to golden output is a reviewed diff (`UPDATE_GOLDEN=1 npm test` to accept).
+
+## Watcher (Stripe)
+Snapshots Stripe's public OpenAPI document, diffs snapshots into the change taxonomy, and joins the
+breaking changes against a manifest. Only changes that intersect something the code reads, writes,
+calls, or handles become alerts; additive changes never do.
+
+```
+npm run scan -- ../some-repo -o manifest.json
+npx tsx src/cli.ts watch fetch                # latest spec: "pending" first time, "accepted" second time (debounce)
+npx tsx src/cli.ts watch fetch --ref <sha>    # a historical spec by git ref (trusted, no debounce)
+npx tsx src/cli.ts watch status
+npx tsx src/cli.ts watch diff                 # summary of changes between the last two accepted snapshots
+npx tsx src/cli.ts watch alerts --manifest manifest.json
+npx tsx src/cli.ts watch replay --from-ref <sha> --to-ref <sha> --manifest manifest.json
+```
+
+Acceptance discipline: a snapshot must parse, keep its operation count within ±20% of the last
+accepted one, and (for "latest" fetches) be seen in two consecutive fetches. Everything else is
+quarantined and listed by `watch status`. Snapshots live under `.arcdrip/` (git-ignored).
+
+Version applicability: code pinned to an older Stripe API version gets `advisory` alerts with a
+note; unpinned code gets `breaking`.
+
+Replay of the 2025 basil change against vercel/nextjs-subscription-payments:
+```
+npx tsx src/cli.ts watch replay \
+  --from-ref 5a411d0d1e527229cdb4d6633197ab8009899ce6 \
+  --to-ref   a2daacd414ad5c3cf88d79a4214e35595b239490 \
+  --manifest nsp.manifest.json
+```
+276 spec changes, 152 breaking, 2 alerts: `current_period_start` and `current_period_end` removed
+from `subscription`, read at `utils/supabase/admin.ts:228`.

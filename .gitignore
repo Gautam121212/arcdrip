@@ -1,4 +1,4 @@
 node_modules/
 dist/
 *.manifest.local.json
-manifest.local.json
+.arcdrip/
