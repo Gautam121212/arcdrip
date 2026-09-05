@@ -1,0 +1,191 @@
+{
+  "schema": 1,
+  "repo_id": "<repo>",
+  "scanner_version": "0.1.0",
+  "scanned_at": "<time>",
+  "partial": false,
+  "providers": {
+    "stripe": {
+      "pinned_version": "2024-06-20",
+      "sdk": {
+        "package": "stripe",
+        "version": "22.6.1"
+      },
+      "entries": [
+        {
+          "id": "03465bf51e35bb51",
+          "kind": "call",
+          "operation": "POST /v1/refunds",
+          "fields": [
+            {
+              "path": "charge",
+              "dir": "write"
+            }
+          ],
+          "tier": 1,
+          "fieldsComplete": false,
+          "locs": [
+            {
+              "file": "src/billing.ts",
+              "line": 28
+            }
+          ]
+        },
+        {
+          "id": "084acd432837a612",
+          "kind": "call",
+          "operation": "GET /v1/customers/{customer}",
+          "fields": [
+            {
+              "path": "deleted",
+              "dir": "read"
+            },
+            {
+              "path": "invoice_settings.default_payment_method",
+              "dir": "read"
+            }
+          ],
+          "tier": 1,
+          "fieldsComplete": true,
+          "locs": [
+            {
+              "file": "src/billing.ts",
+              "line": 8
+            }
+          ]
+        },
+        {
+          "id": "4014507135f19c3f",
+          "kind": "webhook",
+          "event": "checkout.session.completed",
+          "fields": [],
+          "tier": 1,
+          "fieldsComplete": false,
+          "locs": [
+            {
+              "file": "src/billing.ts",
+              "line": 42
+            }
+          ]
+        },
+        {
+          "id": "4116351bc68f8c3f",
+          "kind": "webhook",
+          "event": "invoice.payment_failed",
+          "fields": [
+            {
+              "path": "data.object.customer",
+              "dir": "read"
+            },
+            {
+              "path": "data.object.last_payment_error.code",
+              "dir": "read"
+            }
+          ],
+          "tier": 1,
+          "fieldsComplete": true,
+          "locs": [
+            {
+              "file": "src/billing.ts",
+              "line": 36
+            }
+          ]
+        },
+        {
+          "id": "53e9eee66d510841",
+          "kind": "call",
+          "operation": "POST /v1/subscriptions",
+          "fields": [
+            {
+              "path": "current_period_end",
+              "dir": "read"
+            },
+            {
+              "path": "id",
+              "dir": "read"
+            },
+            {
+              "path": "status",
+              "dir": "read"
+            },
+            {
+              "path": "customer",
+              "dir": "write"
+            },
+            {
+              "path": "items",
+              "dir": "write"
+            },
+            {
+              "path": "items[].price",
+              "dir": "write"
+            },
+            {
+              "path": "metadata.plan",
+              "dir": "write"
+            }
+          ],
+          "tier": 1,
+          "fieldsComplete": true,
+          "locs": [
+            {
+              "file": "src/billing.ts",
+              "line": 14
+            }
+          ]
+        },
+        {
+          "id": "89942ba6f0d3b94b",
+          "kind": "webhook",
+          "event": "customer.subscription.deleted",
+          "fields": [
+            {
+              "path": "data.object.id",
+              "dir": "read"
+            }
+          ],
+          "tier": 1,
+          "fieldsComplete": true,
+          "locs": [
+            {
+              "file": "src/billing.ts",
+              "line": 40
+            }
+          ]
+        },
+        {
+          "id": "f5ae39b08e8753a9",
+          "kind": "call",
+          "operation": "GET /v1/invoices",
+          "fields": [
+            {
+              "path": "data[].total",
+              "dir": "read"
+            },
+            {
+              "path": "customer",
+              "dir": "write"
+            },
+            {
+              "path": "limit",
+              "dir": "write"
+            }
+          ],
+          "tier": 1,
+          "fieldsComplete": true,
+          "locs": [
+            {
+              "file": "src/billing.ts",
+              "line": 23
+            }
+          ]
+        }
+      ]
+    }
+  },
+  "coverage": {
+    "t1": 7,
+    "t2": 0,
+    "t3": 0
+  }
+}
