@@ -1,0 +1,244 @@
+{
+  "schema": 1,
+  "repo_id": "<repo>",
+  "scanner_version": "0.1.0",
+  "scanned_at": "<time>",
+  "partial": false,
+  "providers": {
+    "stripe": {
+      "pinned_version": null,
+      "sdk": {
+        "package": "stripe",
+        "version": "22.6.1"
+      },
+      "entries": [
+        {
+          "id": "0dbf386515831d4c",
+          "kind": "call",
+          "operation": "POST /v1/checkout/sessions",
+          "fields": [
+            {
+              "path": "id",
+              "dir": "read"
+            },
+            {
+              "path": "customer",
+              "dir": "write"
+            },
+            {
+              "path": "line_items",
+              "dir": "write"
+            },
+            {
+              "path": "line_items[].price",
+              "dir": "write"
+            },
+            {
+              "path": "line_items[].quantity",
+              "dir": "write"
+            },
+            {
+              "path": "mode",
+              "dir": "write"
+            },
+            {
+              "path": "subscription_data.trial_period_days",
+              "dir": "write"
+            },
+            {
+              "path": "success_url",
+              "dir": "write"
+            }
+          ],
+          "tier": 1,
+          "fieldsComplete": false,
+          "locs": [
+            {
+              "file": "src/handler.ts",
+              "line": 22
+            }
+          ]
+        },
+        {
+          "id": "12eb02bf3bb865ef",
+          "kind": "webhook",
+          "event": "checkout.session.completed",
+          "fields": [
+            {
+              "path": "data.object.customer",
+              "dir": "read"
+            },
+            {
+              "path": "data.object.mode",
+              "dir": "read"
+            },
+            {
+              "path": "data.object.subscription",
+              "dir": "read"
+            }
+          ],
+          "tier": 1,
+          "fieldsComplete": true,
+          "locs": [
+            {
+              "file": "src/handler.ts",
+              "line": 68
+            }
+          ]
+        },
+        {
+          "id": "2ed968b9708a4e6c",
+          "kind": "webhook",
+          "event": "product.created",
+          "fields": [],
+          "tier": 1,
+          "fieldsComplete": false,
+          "locs": [
+            {
+              "file": "src/handler.ts",
+              "line": 58
+            }
+          ]
+        },
+        {
+          "id": "605fe4ef5d3c85ce",
+          "kind": "call",
+          "operation": "POST /v1/billing_portal/sessions",
+          "fields": [
+            {
+              "path": "url",
+              "dir": "read"
+            },
+            {
+              "path": "customer",
+              "dir": "write"
+            },
+            {
+              "path": "return_url",
+              "dir": "write"
+            }
+          ],
+          "tier": 1,
+          "fieldsComplete": true,
+          "locs": [
+            {
+              "file": "src/handler.ts",
+              "line": 45
+            }
+          ]
+        },
+        {
+          "id": "79d4465aa8fb2ac2",
+          "kind": "webhook",
+          "event": "customer.subscription.deleted",
+          "fields": [
+            {
+              "path": "data.object.customer",
+              "dir": "read"
+            },
+            {
+              "path": "data.object.id",
+              "dir": "read"
+            }
+          ],
+          "tier": 1,
+          "fieldsComplete": true,
+          "locs": [
+            {
+              "file": "src/handler.ts",
+              "line": 63
+            }
+          ]
+        },
+        {
+          "id": "7de239d1106a80ee",
+          "kind": "call",
+          "operation": "POST /v1/customers",
+          "fields": [
+            {
+              "path": "id",
+              "dir": "read"
+            },
+            {
+              "path": "email",
+              "dir": "write"
+            },
+            {
+              "path": "metadata.appUserId",
+              "dir": "write"
+            }
+          ],
+          "tier": 1,
+          "fieldsComplete": true,
+          "locs": [
+            {
+              "file": "src/handler.ts",
+              "line": 33
+            }
+          ]
+        },
+        {
+          "id": "bcaa239ff3c15139",
+          "kind": "call",
+          "operation": "POST /v1/customers/{customer}",
+          "fields": [
+            {
+              "path": "name",
+              "dir": "write"
+            }
+          ],
+          "tier": 1,
+          "fieldsComplete": true,
+          "locs": [
+            {
+              "file": "src/handler.ts",
+              "line": 40
+            }
+          ]
+        },
+        {
+          "id": "c1b664113cf607a4",
+          "kind": "webhook",
+          "event": "product.updated",
+          "fields": [],
+          "tier": 1,
+          "fieldsComplete": false,
+          "locs": [
+            {
+              "file": "src/handler.ts",
+              "line": 59
+            }
+          ]
+        },
+        {
+          "id": "d7f36e9f1f43f92c",
+          "kind": "webhook",
+          "event": "customer.subscription.created",
+          "fields": [
+            {
+              "path": "data.object.customer",
+              "dir": "read"
+            },
+            {
+              "path": "data.object.id",
+              "dir": "read"
+            }
+          ],
+          "tier": 1,
+          "fieldsComplete": true,
+          "locs": [
+            {
+              "file": "src/handler.ts",
+              "line": 62
+            }
+          ]
+        }
+      ]
+    }
+  },
+  "coverage": {
+    "t1": 9,
+    "t2": 0,
+    "t3": 0
+  }
+}

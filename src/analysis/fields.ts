@@ -30,8 +30,13 @@ export function isDeclaredInPackage(node: Node, pkg: string): boolean {
 export function collectWriteFields(node: Node | undefined, prefix = ""): FieldResult {
   const out: FieldResult = { fields: [], complete: true };
   if (!node) return out;
+  node = unwrapExpression(node);
+  if (Node.isIdentifier(node) && prefix === "") {
+    // const params = { ... }; call(params)  — follow the local declaration.
+    return collectWriteFieldsFromVariable(node);
+  }
   if (!Node.isObjectLiteralExpression(node)) {
-    // Variable, function call, etc. — we don't chase it in Phase 1.
+    // Function call, member access, etc. — we don't chase it in Phase 1.
     out.complete = false;
     return out;
   }
@@ -69,6 +74,54 @@ export function collectWriteFields(node: Node | undefined, prefix = ""): FieldRe
 }
 
 /**
+ * Follow an identifier argument to its declaration. Collect keys from the
+ * initializer and from every later `x = {...}` reassignment. If the variable
+ * is mutated in any other way (x.foo = ..., passed to a function that may
+ * mutate it, spread from an unknown), the list is a lower bound.
+ */
+function collectWriteFieldsFromVariable(id: Identifier): FieldResult {
+  const out: FieldResult = { fields: [], complete: true };
+  const decl = id.getSymbol()?.getDeclarations().find((d) => Node.isVariableDeclaration(d));
+  if (!decl || !Node.isVariableDeclaration(decl)) return { fields: [], complete: false };
+  const nameNode = decl.getNameNode();
+  if (!Node.isIdentifier(nameNode)) return { fields: [], complete: false };
+
+  const init = decl.getInitializer();
+  if (init) {
+    const r = collectWriteFields(init);
+    out.fields.push(...r.fields);
+    out.complete &&= r.complete;
+  } else {
+    out.complete = false; // declared without initializer; assignments below may fill it
+  }
+
+  for (const ref of nameNode.findReferencesAsNodes()) {
+    if (ref === nameNode || ref === id) continue;
+    const parent = ref.getParent();
+    if (parent && Node.isBinaryExpression(parent) && parent.getLeft() === ref && parent.getOperatorToken().getText() === "=") {
+      const r = collectWriteFields(parent.getRight());
+      out.fields.push(...r.fields);
+      out.complete &&= r.complete;
+      continue;
+    }
+    if (parent && Node.isPropertyAccessExpression(parent) && parent.getExpression() === ref) {
+      const gp = parent.getParent();
+      const isWrite = gp && Node.isBinaryExpression(gp) && gp.getLeft() === parent && gp.getOperatorToken().getText() === "=";
+      if (isWrite) {
+        out.fields.push({ path: climbPath(parent, parent.getName()), dir: "write" });
+      }
+      continue; // reads of params don't change what is sent
+    }
+    if (parent && Node.isCallExpression(parent) && parent.getExpression() !== ref) {
+      // Passed to some other function: it may be the API call itself (fine) or a mutator (unknown).
+      continue;
+    }
+    // Any other use (spread into something, returned, etc.) doesn't change what is sent.
+  }
+  return out;
+}
+
+/**
  * Response side: given the call expression, find where its result goes and
  * collect the property paths read from it.
  *
@@ -84,12 +137,39 @@ export function collectReadFields(call: CallExpression): FieldResult {
   let node: Node = call;
   let parent = node.getParent();
 
-  // Unwrap `await` and parentheses.
-  while (parent && (Node.isAwaitExpression(parent) || Node.isParenthesizedExpression(parent))) {
+  // Unwrap `await`, parentheses, `as` casts, `!`.
+  while (
+    parent &&
+    (Node.isAwaitExpression(parent) ||
+      Node.isParenthesizedExpression(parent) ||
+      Node.isAsExpression(parent) ||
+      Node.isNonNullExpression(parent) ||
+      Node.isSatisfiesExpression(parent))
+  ) {
     node = parent;
     parent = node.getParent();
   }
   if (!parent) return out;
+
+  // `await call();` as a statement: the result is discarded. Nothing is read; that is complete.
+  if (Node.isExpressionStatement(parent)) return out;
+
+  // `session = await call();` where `session` was declared earlier (let session;)
+  if (Node.isBinaryExpression(parent) && parent.getRight() === node && parent.getOperatorToken().getText() === "=") {
+    const left = parent.getLeft();
+    if (Node.isIdentifier(left)) {
+      const decl = left.getSymbol()?.getDeclarations().find((d) => Node.isVariableDeclaration(d));
+      const nameNode = decl && Node.isVariableDeclaration(decl) ? decl.getNameNode() : undefined;
+      if (nameNode && Node.isIdentifier(nameNode)) {
+        const r = readsFromIdentifier(nameNode);
+        out.fields.push(...r.fields);
+        out.complete = r.complete;
+        return out;
+      }
+    }
+    out.complete = false;
+    return out;
+  }
 
   // (await call()).field
   if (Node.isPropertyAccessExpression(parent) && parent.getExpression() === node) {
@@ -124,8 +204,16 @@ function readsFromIdentifier(decl: Identifier): FieldResult {
   const out: FieldResult = { fields: [], complete: true };
   for (const ref of decl.findReferencesAsNodes()) {
     if (ref === decl) continue;
-    const parent = ref.getParent();
-    if (parent && Node.isPropertyAccessExpression(parent) && parent.getExpression() === ref) {
+    let parent: Node | undefined = ref.getParent();
+    // `x = ...` is a write to the variable, not a use of the value.
+    if (parent && Node.isBinaryExpression(parent) && parent.getLeft() === ref && parent.getOperatorToken().getText() === "=") continue;
+    // Look through `x!`, `(x)`, `x as T` to the real consumer.
+    let carrier: Node = ref;
+    while (parent && (Node.isNonNullExpression(parent) || Node.isParenthesizedExpression(parent) || Node.isAsExpression(parent))) {
+      carrier = parent;
+      parent = carrier.getParent();
+    }
+    if (parent && Node.isPropertyAccessExpression(parent) && parent.getExpression() === carrier) {
       out.fields.push({ path: climbPath(parent, parent.getName()), dir: "read" });
       continue;
     }
@@ -135,10 +223,40 @@ function readsFromIdentifier(decl: Identifier): FieldResult {
       out.complete &&= r.complete;
       continue;
     }
-    // Bare use: passed along, returned, spread, compared. Stop tracking.
+    if (parent && isNonExposingUse(carrier, parent)) continue;
+    // Bare use: passed along, returned, spread, assigned elsewhere. Stop tracking.
     out.complete = false;
   }
   return out;
+}
+
+/** Uses of a value that cannot read its fields: `!x`, `if (x)`, `x === y`, `typeof x`, `x ? a : b` (as the condition). */
+export function isNonExposingUse(node: Node, parent: Node): boolean {
+  if (Node.isPrefixUnaryExpression(parent)) return true; // !x, -x, typeof handled below
+  if (Node.isTypeOfExpression(parent)) return true;
+  if (Node.isIfStatement(parent) && parent.getExpression() === node) return true;
+  if (Node.isWhileStatement(parent) && parent.getExpression() === node) return true;
+  if (Node.isConditionalExpression(parent) && parent.getCondition() === node) return true;
+  if (Node.isBinaryExpression(parent)) {
+    const op = parent.getOperatorToken().getText();
+    if (["===", "!==", "==", "!="].includes(op)) return true;
+  }
+  return false;
+}
+
+/** Descend through `x as T`, `(x)`, `x!`, `x satisfies T` to the underlying expression. */
+export function unwrapExpression(node: Node): Node {
+  let current = node;
+  while (
+    Node.isAsExpression(current) ||
+    Node.isParenthesizedExpression(current) ||
+    Node.isNonNullExpression(current) ||
+    Node.isSatisfiesExpression(current) ||
+    Node.isTypeAssertion(current)
+  ) {
+    current = current.getExpression();
+  }
+  return current;
 }
 
 /** const { a, b: { c }, d: renamed } = x  ->  a, b.c, d */

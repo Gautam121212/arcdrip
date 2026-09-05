@@ -22,6 +22,7 @@ const DETECTORS: Record<string, Detector> = {
 
 export function scan(opts: ScanOptions): Manifest {
   const rootDir = resolve(opts.rootDir);
+  if (!existsSync(rootDir)) throw new Error(`scan root does not exist: ${rootDir}`);
   const budgetMs = opts.budgetMs ?? 5 * 60 * 1000;
   const started = Date.now();
   let partial = false;
