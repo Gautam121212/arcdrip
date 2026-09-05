@@ -6,7 +6,8 @@
   "scripts": {
     "test": "vitest run",
     "scan": "tsx src/cli.ts scan",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "gen:stripe-table": "tsx scripts/gen-stripe-table.ts"
   },
   "keywords": [],
   "author": "",

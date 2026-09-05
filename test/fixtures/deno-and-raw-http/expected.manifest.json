@@ -13,28 +13,9 @@
       },
       "entries": [
         {
-          "id": "1e3ae8f2c5503d7c",
+          "id": "60334222ce826ccf",
           "kind": "call",
-          "operation": "sdk:accounts.retrieve",
-          "fields": [
-            {
-              "path": "id",
-              "dir": "read"
-            }
-          ],
-          "tier": 2,
-          "fieldsComplete": true,
-          "locs": [
-            {
-              "file": "src/setup.ts",
-              "line": 12
-            }
-          ]
-        },
-        {
-          "id": "50b5bbd981137059",
-          "kind": "call",
-          "operation": "sdk:webhookEndpoints.create",
+          "operation": "POST /v1/webhook_endpoints",
           "fields": [
             {
               "path": "secret",
@@ -63,9 +44,9 @@
           ]
         },
         {
-          "id": "9c9fe09cdb7e5683",
+          "id": "6b1b5ab6cabaf2e0",
           "kind": "call",
-          "operation": "sdk:webhookEndpoints.list",
+          "operation": "GET /v1/webhook_endpoints",
           "fields": [
             {
               "path": "data",
@@ -86,6 +67,39 @@
           ]
         },
         {
+          "id": "7d4ba0cbbe2deba0",
+          "kind": "call",
+          "operation": "GET /v1/accounts/{} | GET /v1/account",
+          "fields": [
+            {
+              "path": "id",
+              "dir": "read"
+            }
+          ],
+          "tier": 2,
+          "fieldsComplete": true,
+          "locs": [
+            {
+              "file": "src/setup.ts",
+              "line": 12
+            }
+          ]
+        },
+        {
+          "id": "9a48016c213d0566",
+          "kind": "call",
+          "operation": "DELETE /v1/webhook_endpoints/{}",
+          "fields": [],
+          "tier": 2,
+          "fieldsComplete": true,
+          "locs": [
+            {
+              "file": "src/setup.ts",
+              "line": 9
+            }
+          ]
+        },
+        {
           "id": "b087f6a65d2c5230",
           "kind": "call",
           "operation": "host:api.stripe.com",
@@ -99,20 +113,6 @@
             },
             {
               "file": "src/client.ts",
-              "line": 9
-            }
-          ]
-        },
-        {
-          "id": "d56eb09fc35063d1",
-          "kind": "call",
-          "operation": "sdk:webhookEndpoints.del",
-          "fields": [],
-          "tier": 2,
-          "fieldsComplete": true,
-          "locs": [
-            {
-              "file": "src/setup.ts",
               "line": 9
             }
           ]

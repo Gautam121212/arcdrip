@@ -101,6 +101,25 @@
           ]
         },
         {
+          "id": "4940c7786139d5ad",
+          "kind": "call",
+          "operation": "POST /v1/customers/{}",
+          "fields": [
+            {
+              "path": "name",
+              "dir": "write"
+            }
+          ],
+          "tier": 1,
+          "fieldsComplete": true,
+          "locs": [
+            {
+              "file": "src/handler.ts",
+              "line": 40
+            }
+          ]
+        },
+        {
           "id": "605fe4ef5d3c85ce",
           "kind": "call",
           "operation": "POST /v1/billing_portal/sessions",
@@ -174,25 +193,6 @@
             {
               "file": "src/handler.ts",
               "line": 33
-            }
-          ]
-        },
-        {
-          "id": "bcaa239ff3c15139",
-          "kind": "call",
-          "operation": "POST /v1/customers/{customer}",
-          "fields": [
-            {
-              "path": "name",
-              "dir": "write"
-            }
-          ],
-          "tier": 1,
-          "fieldsComplete": true,
-          "locs": [
-            {
-              "file": "src/handler.ts",
-              "line": 40
             }
           ]
         },

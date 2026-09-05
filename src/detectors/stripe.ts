@@ -12,6 +12,7 @@ import { readFileSync, existsSync } from "node:fs";
 import { join, dirname } from "node:path";
 import type { Entry, FieldRef, Location } from "../manifest/schema.js";
 import type { DetectorResult } from "../scan.js";
+import { operationsFromSdk, BUNDLED_OPERATIONS, type OperationTable } from "./stripe-sdk-table.js";
 import {
   collectReadFields,
   collectWriteFields,
@@ -26,52 +27,6 @@ import {
 export const PROVIDER = "stripe";
 const PKG = "stripe";
 
-/**
- * SDK method path -> HTTP operation.
- * WEEK 1: hand-maintained for the most common resources.
- * WEEK 2: derive this table from the installed SDK's own resource definitions
- * (stripe-node ships method + fullPath per resource) so it is correct for
- * whatever version the customer has installed. Track that as an issue.
- */
-export const OPERATIONS: Record<string, string> = {
-  "customers.create": "POST /v1/customers",
-  "customers.retrieve": "GET /v1/customers/{customer}",
-  "customers.update": "POST /v1/customers/{customer}",
-  "customers.del": "DELETE /v1/customers/{customer}",
-  "customers.list": "GET /v1/customers",
-  "paymentIntents.create": "POST /v1/payment_intents",
-  "paymentIntents.retrieve": "GET /v1/payment_intents/{intent}",
-  "paymentIntents.update": "POST /v1/payment_intents/{intent}",
-  "paymentIntents.confirm": "POST /v1/payment_intents/{intent}/confirm",
-  "paymentIntents.cancel": "POST /v1/payment_intents/{intent}/cancel",
-  "subscriptions.create": "POST /v1/subscriptions",
-  "subscriptions.retrieve": "GET /v1/subscriptions/{subscription_exposed_id}",
-  "subscriptions.update": "POST /v1/subscriptions/{subscription_exposed_id}",
-  "subscriptions.cancel": "DELETE /v1/subscriptions/{subscription_exposed_id}",
-  "subscriptions.list": "GET /v1/subscriptions",
-  "invoices.create": "POST /v1/invoices",
-  "invoices.retrieve": "GET /v1/invoices/{invoice}",
-  "invoices.list": "GET /v1/invoices",
-  "invoices.pay": "POST /v1/invoices/{invoice}/pay",
-  "charges.create": "POST /v1/charges",
-  "charges.retrieve": "GET /v1/charges/{charge}",
-  "refunds.create": "POST /v1/refunds",
-  "checkout.sessions.create": "POST /v1/checkout/sessions",
-  "checkout.sessions.retrieve": "GET /v1/checkout/sessions/{session}",
-  "checkout.sessions.list": "GET /v1/checkout/sessions",
-  "prices.create": "POST /v1/prices",
-  "prices.retrieve": "GET /v1/prices/{price}",
-  "prices.list": "GET /v1/prices",
-  "products.create": "POST /v1/products",
-  "products.retrieve": "GET /v1/products/{id}",
-  "paymentMethods.attach": "POST /v1/payment_methods/{payment_method}/attach",
-  "paymentMethods.list": "GET /v1/payment_methods",
-  "setupIntents.create": "POST /v1/setup_intents",
-  "balanceTransactions.list": "GET /v1/balance_transactions",
-  "billingPortal.sessions.create": "POST /v1/billing_portal/sessions",
-  "events.retrieve": "GET /v1/events/{id}",
-};
-
 const WEBHOOK_VERIFY = new Set(["webhooks.constructEvent", "webhooks.constructEventAsync"]);
 
 /** Import specifiers that name the Stripe SDK without going through node_modules (Deno, edge runtimes). */
@@ -85,11 +40,18 @@ export function detectStripe(project: Project, rootDir: string): DetectorResult 
   let pinned: string | null = null;
   let degraded = false;
 
+  // Operation table: the customer's installed SDK is the truth for their version;
+  // the bundled table covers SDKs we can't see (Deno imports); `sdk:` is the honest fallback.
+  const sdk = findSdk(rootDir);
+  const installed = sdk ? operationsFromSdk(sdk.root) : null;
+  const resolveOperation = (method: string): string =>
+    installed?.get(method) ?? BUNDLED_OPERATIONS.get(method) ?? `sdk:${method}`;
+
   for (const sf of project.getSourceFiles()) {
     if (sf.getFilePath().includes("/node_modules/")) continue;
     try {
       pinned ??= findApiVersionPin(sf);
-      scanFile(sf, rootDir, entries);
+      scanFile(sf, rootDir, entries, resolveOperation);
     } catch (err) {
       // One file must never take the provider down. Report, mark degraded, continue.
       degraded = true;
@@ -101,14 +63,14 @@ export function detectStripe(project: Project, rootDir: string): DetectorResult 
   return {
     section: {
       pinned_version: pinned,
-      sdk: readSdkVersion(rootDir),
+      sdk: sdk ? { package: PKG, version: sdk.version } : declaredSdkVersion(rootDir),
       entries: [...entries.values()].sort((a, b) => a.id.localeCompare(b.id)),
     },
     degraded,
   };
 }
 
-function scanFile(sf: SourceFile, rootDir: string, entries: Map<string, Entry>): void {
+function scanFile(sf: SourceFile, rootDir: string, entries: Map<string, Entry>, resolveOperation: (m: string) => string): void {
   {
     // Tier 3: the host named in a string literal (raw HTTP with a dynamic path, a base URL constant).
     for (const lit of sf.getDescendantsOfKind(SyntaxKind.StringLiteral)) {
@@ -146,8 +108,7 @@ function scanFile(sf: SourceFile, rootDir: string, entries: Map<string, Entry>):
 
       const write = collectWriteFields(firstParamsArg(call));
       const read = collectReadFields(call);
-      // Not in our table: keep the SDK method path so the watcher can map it. Fields are still real.
-      const operation = OPERATIONS[method] ?? `sdk:${method}`;
+      const operation = resolveOperation(method);
       mergeEntry(
         entries,
         makeEntry("call", operation, [...write.fields, ...read.fields], tier, write.complete && read.complete, loc(call, rootDir)),
@@ -319,24 +280,27 @@ function clauseLeaksObject(clause: Node, eventVar: string, aliases: Set<string>)
   return false;
 }
 
-function readSdkVersion(rootDir: string): { package: string; version: string } | null {
-  // Walk up like Node resolution does (monorepos, hoisted installs). We read
-  // only the SDK's package.json, never its code. `require.resolve` is avoided
-  // because packages with an "exports" map don't expose ./package.json.
+/** Locate the installed SDK by walking up like Node resolution does. We read its package.json and resource files, never execute it. */
+function findSdk(rootDir: string): { root: string; version: string } | null {
   let dir = rootDir;
   for (let i = 0; i < 20; i++) {
-    const candidate = join(dir, "node_modules", PKG, "package.json");
-    if (existsSync(candidate)) {
+    const root = join(dir, "node_modules", PKG);
+    if (existsSync(join(root, "package.json"))) {
       try {
-        return { package: PKG, version: String(JSON.parse(readFileSync(candidate, "utf8")).version) };
+        return { root, version: String(JSON.parse(readFileSync(join(root, "package.json"), "utf8")).version) };
       } catch {
-        break;
+        return null;
       }
     }
     const parent = dirname(dir);
     if (parent === dir) break;
     dir = parent;
   }
+  return null;
+}
+
+/** No SDK on disk: report what package.json declares, if anything. */
+function declaredSdkVersion(rootDir: string): { package: string; version: string } | null {
   try {
     const pkg = JSON.parse(readFileSync(join(rootDir, "package.json"), "utf8"));
     const spec = pkg.dependencies?.[PKG] ?? pkg.devDependencies?.[PKG];
@@ -389,3 +353,4 @@ function mergeEntry(map: Map<string, Entry>, e: Entry): void {
 }
 
 export { climbPath };
+export type { OperationTable };

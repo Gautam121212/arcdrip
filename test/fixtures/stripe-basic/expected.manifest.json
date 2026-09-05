@@ -32,29 +32,6 @@
           ]
         },
         {
-          "id": "084acd432837a612",
-          "kind": "call",
-          "operation": "GET /v1/customers/{customer}",
-          "fields": [
-            {
-              "path": "deleted",
-              "dir": "read"
-            },
-            {
-              "path": "invoice_settings.default_payment_method",
-              "dir": "read"
-            }
-          ],
-          "tier": 1,
-          "fieldsComplete": true,
-          "locs": [
-            {
-              "file": "src/billing.ts",
-              "line": 8
-            }
-          ]
-        },
-        {
           "id": "4014507135f19c3f",
           "kind": "webhook",
           "event": "checkout.session.completed",
@@ -131,6 +108,29 @@
             {
               "file": "src/billing.ts",
               "line": 14
+            }
+          ]
+        },
+        {
+          "id": "774c4925c05f4185",
+          "kind": "call",
+          "operation": "GET /v1/customers/{}",
+          "fields": [
+            {
+              "path": "deleted",
+              "dir": "read"
+            },
+            {
+              "path": "invoice_settings.default_payment_method",
+              "dir": "read"
+            }
+          ],
+          "tier": 1,
+          "fieldsComplete": true,
+          "locs": [
+            {
+              "file": "src/billing.ts",
+              "line": 8
             }
           ]
         },
