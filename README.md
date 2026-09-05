@@ -21,7 +21,12 @@ Design: see `docs/phase1-design.md`.
 - **T2** — client built from an explicit SDK import the checker can't resolve (`npm:stripe`, esm.sh). Operation from the method name; fields extracted the same way.
 - **T3** — the API host appears in a string (raw HTTP with dynamic paths, a base-URL constant). Provider presence only; never fields.
 
-Operations not yet in the hand-written table appear as `sdk:<method.path>` with fields intact.
+## Operation table
+SDK method → HTTP operation is **derived from the installed stripe-node package** (its generated
+resource files name every verb and path), so it is correct for whatever version the customer has.
+Path placeholders are canonicalised to `{}`. When no SDK is on disk (Deno `npm:stripe`), a bundled
+table generated from a known version is used (`npm run gen:stripe-table` after bumping `stripe`).
+Anything still unresolved appears as `sdk:<method.path>` with fields intact.
 
 ## Invariants (enforced by tests)
 - The manifest schema is a strict allowlist; unknown keys are rejected.
