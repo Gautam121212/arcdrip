@@ -1,0 +1,128 @@
+{
+  "schema": 1,
+  "repo_id": "<repo>",
+  "scanner_version": "0.1.0",
+  "scanned_at": "<time>",
+  "partial": false,
+  "providers": {
+    "stripe": {
+      "pinned_version": null,
+      "sdk": {
+        "package": "stripe",
+        "version": "22.6.1"
+      },
+      "entries": [
+        {
+          "id": "1e3ae8f2c5503d7c",
+          "kind": "call",
+          "operation": "sdk:accounts.retrieve",
+          "fields": [
+            {
+              "path": "id",
+              "dir": "read"
+            }
+          ],
+          "tier": 2,
+          "fieldsComplete": true,
+          "locs": [
+            {
+              "file": "src/setup.ts",
+              "line": 12
+            }
+          ]
+        },
+        {
+          "id": "50b5bbd981137059",
+          "kind": "call",
+          "operation": "sdk:webhookEndpoints.create",
+          "fields": [
+            {
+              "path": "secret",
+              "dir": "read"
+            },
+            {
+              "path": "enabled_events",
+              "dir": "write"
+            },
+            {
+              "path": "metadata.managed_by",
+              "dir": "write"
+            },
+            {
+              "path": "url",
+              "dir": "write"
+            }
+          ],
+          "tier": 2,
+          "fieldsComplete": true,
+          "locs": [
+            {
+              "file": "src/setup.ts",
+              "line": 11
+            }
+          ]
+        },
+        {
+          "id": "9c9fe09cdb7e5683",
+          "kind": "call",
+          "operation": "sdk:webhookEndpoints.list",
+          "fields": [
+            {
+              "path": "data",
+              "dir": "read"
+            },
+            {
+              "path": "limit",
+              "dir": "write"
+            }
+          ],
+          "tier": 2,
+          "fieldsComplete": true,
+          "locs": [
+            {
+              "file": "src/setup.ts",
+              "line": 7
+            }
+          ]
+        },
+        {
+          "id": "b087f6a65d2c5230",
+          "kind": "call",
+          "operation": "host:api.stripe.com",
+          "fields": [],
+          "tier": 3,
+          "fieldsComplete": false,
+          "locs": [
+            {
+              "file": "src/client.ts",
+              "line": 2
+            },
+            {
+              "file": "src/client.ts",
+              "line": 9
+            }
+          ]
+        },
+        {
+          "id": "d56eb09fc35063d1",
+          "kind": "call",
+          "operation": "sdk:webhookEndpoints.del",
+          "fields": [],
+          "tier": 2,
+          "fieldsComplete": true,
+          "locs": [
+            {
+              "file": "src/setup.ts",
+              "line": 9
+            }
+          ]
+        }
+      ]
+    }
+  },
+  "coverage": {
+    "t1": 0,
+    "t2": 4,
+    "t3": 1
+  }
+}

@@ -13,9 +13,28 @@ export interface ScanOptions {
   budgetMs?: number;
   /** Extra file globs to include (relative to rootDir). Defaults to all TS/JS outside node_modules. */
   include?: string[];
+  /** Scan test files too. Off by default: test code is not customer exposure and would generate noise. */
+  includeTests?: boolean;
 }
 
-type Detector = (project: Project, rootDir: string) => ProviderSection;
+export const TEST_GLOBS = [
+  "**/*.test.*",
+  "**/*.spec.*",
+  "**/__tests__/**",
+  "**/__mocks__/**",
+  "**/test/**",
+  "**/tests/**",
+  "**/e2e/**",
+  "**/cypress/**",
+  "**/playwright/**",
+];
+
+export interface DetectorResult {
+  section: ProviderSection;
+  /** true if any file was skipped because analysis threw; the scan is then marked partial */
+  degraded: boolean;
+}
+type Detector = (project: Project, rootDir: string) => DetectorResult;
 const DETECTORS: Record<string, Detector> = {
   [STRIPE]: detectStripe,
 };
@@ -27,7 +46,7 @@ export function scan(opts: ScanOptions): Manifest {
   const started = Date.now();
   let partial = false;
 
-  const project = createProject(rootDir, opts.include);
+  const project = createProject(rootDir, opts.include, opts.includeTests ?? false);
 
   const providers: Record<string, ProviderSection> = {};
   for (const [name, detect] of Object.entries(DETECTORS)) {
@@ -36,12 +55,14 @@ export function scan(opts: ScanOptions): Manifest {
       break;
     }
     try {
-      const section = detect(project, rootDir);
+      const { section, degraded } = detect(project, rootDir);
+      if (degraded) partial = true;
       if (section.entries.length > 0 || section.pinned_version || section.sdk) providers[name] = section;
     } catch (err) {
       // A detector must never take the scan down. Record degradation, move on.
       partial = true;
       console.error(`[arcdrip] detector ${name} failed: ${(err as Error).message}`);
+      if (process.env.ARCDRIP_DEBUG) console.error((err as Error).stack);
     }
   }
 
@@ -62,11 +83,25 @@ export function scan(opts: ScanOptions): Manifest {
   return assertManifest(manifest);
 }
 
-function createProject(rootDir: string, include?: string[]): Project {
+function createProject(rootDir: string, include: string[] | undefined, includeTests: boolean): Project {
   const tsconfig = join(rootDir, "tsconfig.json");
-  const project = existsSync(tsconfig)
-    ? new Project({ tsConfigFilePath: tsconfig, skipAddingFilesFromTsConfig: true })
-    : new Project({ compilerOptions: { allowJs: true, checkJs: false, skipLibCheck: true } });
+  // allowJs is forced on: a plain .js file in a project whose tsconfig lacks it makes the
+  // TypeScript checker throw on contextual typing (seen on supabase/stripe-sync-engine).
+  // checkJs stays off — we resolve symbols, we don't type-check the customer's code.
+  const forced = { allowJs: true, checkJs: false, skipLibCheck: true, noEmit: true };
+  const fallback = () => new Project({ compilerOptions: forced });
+  let project: Project;
+  if (existsSync(tsconfig)) {
+    try {
+      project = new Project({ tsConfigFilePath: tsconfig, skipAddingFilesFromTsConfig: true, compilerOptions: forced });
+    } catch (err) {
+      // Broken/unresolvable tsconfig (missing "extends" package, etc.) must not stop the scan.
+      console.error(`[arcdrip] tsconfig unusable, using defaults: ${(err as Error).message}`);
+      project = fallback();
+    }
+  } else {
+    project = fallback();
+  }
 
   const globs = include ?? ["**/*.{ts,tsx,js,jsx,mts,cts}"];
   project.addSourceFilesAtPaths([
@@ -75,6 +110,7 @@ function createProject(rootDir: string, include?: string[]): Project {
     `!${join(rootDir, "**/dist/**")}`,
     `!${join(rootDir, "**/build/**")}`,
     `!${join(rootDir, "**/*.d.ts")}`,
+    ...(includeTests ? [] : TEST_GLOBS.map((g) => `!${join(rootDir, g)}`)),
   ]);
   return project;
 }

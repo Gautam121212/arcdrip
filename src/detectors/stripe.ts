@@ -10,7 +10,8 @@ import { Node, SyntaxKind, type Project, type SourceFile, type CallExpression } 
 import { createHash } from "node:crypto";
 import { readFileSync, existsSync } from "node:fs";
 import { join, dirname } from "node:path";
-import type { Entry, FieldRef, Location, ProviderSection } from "../manifest/schema.js";
+import type { Entry, FieldRef, Location } from "../manifest/schema.js";
+import type { DetectorResult } from "../scan.js";
 import {
   collectReadFields,
   collectWriteFields,
@@ -73,51 +74,108 @@ export const OPERATIONS: Record<string, string> = {
 
 const WEBHOOK_VERIFY = new Set(["webhooks.constructEvent", "webhooks.constructEventAsync"]);
 
-export function detectStripe(project: Project, rootDir: string): ProviderSection {
+/** Import specifiers that name the Stripe SDK without going through node_modules (Deno, edge runtimes). */
+const SDK_SPECIFIER = /^(npm:stripe(@[^/]*)?|https:\/\/esm\.sh\/stripe(@[^/]*)?(\/.*)?|https:\/\/cdn\.skypack\.dev\/stripe(@[^/]*)?)$/;
+
+/** Raw HTTP: any string literal that names the API host. Tier 3 — provider known, operation not. */
+const API_HOST = "api.stripe.com";
+
+export function detectStripe(project: Project, rootDir: string): DetectorResult {
   const entries = new Map<string, Entry>();
   let pinned: string | null = null;
+  let degraded = false;
 
   for (const sf of project.getSourceFiles()) {
     if (sf.getFilePath().includes("/node_modules/")) continue;
+    try {
+      pinned ??= findApiVersionPin(sf);
+      scanFile(sf, rootDir, entries);
+    } catch (err) {
+      // One file must never take the provider down. Report, mark degraded, continue.
+      degraded = true;
+      console.error(`[arcdrip] stripe: skipped ${sf.getFilePath().slice(rootDir.length + 1)}: ${(err as Error).message}`);
+      if (process.env.ARCDRIP_DEBUG) console.error((err as Error).stack);
+    }
+  }
 
-    pinned ??= findApiVersionPin(sf);
+  return {
+    section: {
+      pinned_version: pinned,
+      sdk: readSdkVersion(rootDir),
+      entries: [...entries.values()].sort((a, b) => a.id.localeCompare(b.id)),
+    },
+    degraded,
+  };
+}
+
+function scanFile(sf: SourceFile, rootDir: string, entries: Map<string, Entry>): void {
+  {
+    // Tier 3: the host named in a string literal (raw HTTP with a dynamic path, a base URL constant).
+    for (const lit of sf.getDescendantsOfKind(SyntaxKind.StringLiteral)) {
+      if (!lit.getLiteralValue().includes(API_HOST)) continue;
+      mergeEntry(entries, makeEntry("call", `host:${API_HOST}`, [], 3, false, loc(lit, rootDir)));
+    }
+    for (const tpl of sf.getDescendantsOfKind(SyntaxKind.NoSubstitutionTemplateLiteral)) {
+      if (!tpl.getLiteralValue().includes(API_HOST)) continue;
+      mergeEntry(entries, makeEntry("call", `host:${API_HOST}`, [], 3, false, loc(tpl, rootDir)));
+    }
+    for (const head of sf.getDescendantsOfKind(SyntaxKind.TemplateHead)) {
+      if (!head.getLiteralText().includes(API_HOST)) continue;
+      mergeEntry(entries, makeEntry("call", `host:${API_HOST}`, [], 3, false, loc(head, rootDir)));
+    }
 
     for (const call of sf.getDescendantsOfKind(SyntaxKind.CallExpression)) {
       const callee = call.getExpression();
       if (!Node.isPropertyAccessExpression(callee)) continue;
-      if (!isDeclaredInPackage(callee.getNameNode(), PKG)) continue;
-
       const chain = propertyChain(callee);
       if (!chain) continue;
+
+      // Tier 1: the method is declared by the stripe package (type checker says so).
+      // Tier 2: the client was constructed from an explicit SDK import we can't resolve (npm:stripe on Deno).
+      let tier: 1 | 2;
+      if (isDeclaredInPackage(callee.getNameNode(), PKG)) tier = 1;
+      else if (isClientFromSdkImport(chain.root)) tier = 2;
+      else continue;
+
       const method = chain.names.join("."); // e.g. "checkout.sessions.create"
 
       if (WEBHOOK_VERIFY.has(method)) {
-        for (const e of detectWebhookHandlers(call, rootDir)) mergeEntry(entries, e);
-        continue;
-      }
-
-      const operation = OPERATIONS[method];
-      if (!operation) {
-        // Declared by stripe but not in our table: record the operation as the
-        // SDK path so the watcher can still match provider-wide events.
-        mergeEntry(entries, makeEntry("call", `sdk:${method}`, [], 1, false, loc(call, rootDir)));
+        for (const e of detectWebhookHandlers(call, rootDir)) mergeEntry(entries, { ...e, tier });
         continue;
       }
 
       const write = collectWriteFields(firstParamsArg(call));
       const read = collectReadFields(call);
+      // Not in our table: keep the SDK method path so the watcher can map it. Fields are still real.
+      const operation = OPERATIONS[method] ?? `sdk:${method}`;
       mergeEntry(
         entries,
-        makeEntry("call", operation, [...write.fields, ...read.fields], 1, write.complete && read.complete, loc(call, rootDir)),
+        makeEntry("call", operation, [...write.fields, ...read.fields], tier, write.complete && read.complete, loc(call, rootDir)),
       );
     }
   }
+}
 
-  return {
-    pinned_version: pinned,
-    sdk: readSdkVersion(rootDir),
-    entries: [...entries.values()].sort((a, b) => a.id.localeCompare(b.id)),
-  };
+/**
+ * `const stripe = new Stripe(key)` where `Stripe` was imported from "npm:stripe" or
+ * an esm.sh URL. The type checker can't resolve those, so we trust the import text.
+ */
+function isClientFromSdkImport(root: Node): boolean {
+  try {
+    const decl = root.getSymbol()?.getDeclarations().find((d) => Node.isVariableDeclaration(d));
+    if (!decl || !Node.isVariableDeclaration(decl)) return false;
+    const init = decl.getInitializer();
+    if (!init) return false;
+    const inner = unwrapExpression(Node.isAwaitExpression(init) ? init.getExpression() : init);
+    if (!Node.isNewExpression(inner)) return false;
+    const ctor = inner.getExpression();
+    const ctorDecl = ctor.getSymbol()?.getDeclarations()[0];
+    const importDecl = ctorDecl?.getFirstAncestor((a) => Node.isImportDeclaration(a));
+    if (!importDecl || !Node.isImportDeclaration(importDecl)) return false;
+    return SDK_SPECIFIER.test(importDecl.getModuleSpecifierValue());
+  } catch {
+    return false;
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -146,8 +204,12 @@ function firstParamsArg(call: CallExpression): Node | undefined {
   for (const arg of call.getArguments()) {
     const inner = unwrapExpression(arg);
     if (Node.isObjectLiteralExpression(inner)) return inner;
-    const t = inner.getType();
-    if (t.isObject() && !t.isArray() && t.getCallSignatures().length === 0) return inner;
+    try {
+      const t = inner.getType();
+      if (t.isObject() && !t.isArray() && t.getCallSignatures().length === 0) return inner;
+    } catch {
+      // Untypeable argument: not something we can claim is the params object.
+    }
   }
   return undefined;
 }

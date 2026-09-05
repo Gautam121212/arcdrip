@@ -12,14 +12,29 @@ export interface FieldResult {
 
 /** True if the symbol behind this node is declared inside node_modules/<pkg>/ */
 export function isDeclaredInPackage(node: Node, pkg: string): boolean {
-  const sym = node.getSymbol();
-  if (!sym) return false;
-  const needle = `/node_modules/${pkg}/`;
-  const inPkg = (s: import("ts-morph").Symbol) =>
-    s.getDeclarations().some((d) => d.getSourceFile().getFilePath().includes(needle));
-  // Imports are aliases: `import Stripe from "stripe"` declares a local alias whose
-  // declaration is in the customer's file. Follow it to the real declaration.
-  return inPkg(sym) || (sym.isAlias() && inPkg(sym.getAliasedSymbolOrThrow()));
+  // The checker can throw on unusual code (it did, on a .js file). An unresolvable
+  // symbol is "not ours", never a crash.
+  try {
+    const sym = node.getSymbol();
+    if (!sym) return false;
+    const needle = `/node_modules/${pkg}/`;
+    const inPkg = (s: import("ts-morph").Symbol) =>
+      s.getDeclarations().some((d) => d.getSourceFile().getFilePath().includes(needle));
+    // Imports are aliases: `import Stripe from "stripe"` declares a local alias whose
+    // declaration is in the customer's file. Follow it to the real declaration.
+    return inPkg(sym) || (sym.isAlias() && inPkg(sym.getAliasedSymbolOrThrow()));
+  } catch {
+    return false;
+  }
+}
+
+/** findReferencesAsNodes can throw inside the checker; treat that as "can't track". */
+export function safeReferences(id: Identifier): Node[] | null {
+  try {
+    return id.findReferencesAsNodes();
+  } catch {
+    return null;
+  }
 }
 
 /**
@@ -95,7 +110,9 @@ function collectWriteFieldsFromVariable(id: Identifier): FieldResult {
     out.complete = false; // declared without initializer; assignments below may fill it
   }
 
-  for (const ref of nameNode.findReferencesAsNodes()) {
+  const refs = safeReferences(nameNode);
+  if (!refs) return { fields: out.fields, complete: false };
+  for (const ref of refs) {
     if (ref === nameNode || ref === id) continue;
     const parent = ref.getParent();
     if (parent && Node.isBinaryExpression(parent) && parent.getLeft() === ref && parent.getOperatorToken().getText() === "=") {
@@ -202,7 +219,9 @@ export function collectReadFields(call: CallExpression): FieldResult {
 /** Follow every reference to a local identifier and collect property paths read from it. */
 function readsFromIdentifier(decl: Identifier): FieldResult {
   const out: FieldResult = { fields: [], complete: true };
-  for (const ref of decl.findReferencesAsNodes()) {
+  const refs = safeReferences(decl);
+  if (!refs) return { fields: [], complete: false };
+  for (const ref of refs) {
     if (ref === decl) continue;
     let parent: Node | undefined = ref.getParent();
     // `x = ...` is a write to the variable, not a use of the value.
@@ -289,13 +308,28 @@ function readsFromBinding(pattern: Node, prefix: string): FieldResult {
   return out;
 }
 
+/**
+ * Members that belong to the JavaScript value, not to the API object. A path
+ * stops before them: `data.filter(...)` reads `data`, `data.length` reads `data`.
+ */
+const JS_BUILTIN_MEMBERS = new Set([
+  "length", "filter", "map", "find", "findIndex", "findLast", "forEach", "some", "every", "reduce", "reduceRight",
+  "slice", "splice", "includes", "indexOf", "lastIndexOf", "join", "sort", "reverse", "flat", "flatMap", "at",
+  "concat", "entries", "keys", "values", "push", "pop", "shift", "unshift", "fill",
+  "toString", "toFixed", "toLocaleString", "valueOf", "toLowerCase", "toUpperCase", "trim", "trimStart", "trimEnd",
+  "split", "startsWith", "endsWith", "replace", "replaceAll", "padStart", "padEnd", "charAt", "substring", "match",
+  "hasOwnProperty", "toJSON", "then", "catch", "finally",
+]);
+
 /** From a PropertyAccessExpression, keep climbing while the parent is also a property access on us. */
 export function climbPath(node: Node, first: string): string {
+  if (JS_BUILTIN_MEMBERS.has(first)) return "";
   const parts = [first];
   let current: Node = node;
   let parent = current.getParent();
   while (parent) {
     if (Node.isPropertyAccessExpression(parent) && parent.getExpression() === current) {
+      if (JS_BUILTIN_MEMBERS.has(parent.getName())) break;
       parts.push(parent.getName());
       current = parent;
       parent = current.getParent();
@@ -341,6 +375,7 @@ export function dedupeFields(fields: FieldRef[]): FieldRef[] {
   const seen = new Set<string>();
   const out: FieldRef[] = [];
   for (const f of fields) {
+    if (!f.path) continue;
     const k = f.dir + ":" + f.path;
     if (seen.has(k)) continue;
     seen.add(k);

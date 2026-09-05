@@ -12,7 +12,7 @@ function normalise(m: Manifest) {
   return { ...m, scanned_at: "<time>", repo_id: "<repo>" };
 }
 
-describe.each(["stripe-basic", "route-handler-patterns"])("golden: %s", (name) => {
+describe.each(["stripe-basic", "route-handler-patterns", "deno-and-raw-http"])("golden: %s", (name) => {
   const dir = join(FIXTURES, name);
   const expectedPath = join(dir, "expected.manifest.json");
 

@@ -11,13 +11,14 @@ program
   .version(SCANNER_VERSION);
 
 program
-  .command("scan")
+  .command("scan", { isDefault: true })
   .argument("[dir]", "repo root", ".")
   .option("-o, --out <file>", "write manifest JSON here (default: stdout)")
   .option("--redact-paths", "strip file locations, as the upload path does", false)
   .option("--budget <seconds>", "time budget", "300")
-  .action((dir: string, opts: { out?: string; redactPaths: boolean; budget: string }) => {
-    let manifest = scan({ rootDir: dir, budgetMs: Number(opts.budget) * 1000 });
+  .option("--include-tests", "also scan test files (off by default)", false)
+  .action((dir: string, opts: { out?: string; redactPaths: boolean; budget: string; includeTests: boolean }) => {
+    let manifest = scan({ rootDir: dir, budgetMs: Number(opts.budget) * 1000, includeTests: opts.includeTests });
     if (opts.redactPaths) manifest = redactLocations(manifest);
     assertSafeToUpload(manifest);
 
