@@ -2,3 +2,5 @@ node_modules/
 dist/
 *.manifest.local.json
 .arcdrip/
+manifest.local.json
+*.manifest.json
