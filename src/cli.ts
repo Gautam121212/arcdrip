@@ -37,6 +37,18 @@ program
 
 registerWatch(program);
 
+program
+  .command("action")
+  .description("run the GitHub Action logic locally (prints what it would report; no GitHub calls)")
+  .argument("[dir]", "repo root", ".")
+  .option("--data <dir>", "data directory", ".arcdrip-action")
+  .option("--seed-ref <ref>", "baseline spec ref for the first run")
+  .option("--include-tests", "also scan test files", false)
+  .action(async (dir: string, opts: { data: string; seedRef?: string; includeTests: boolean }) => {
+    const { runAction } = await import("./action/main.js");
+    await runAction({ workspace: dir, dataDir: opts.data, seedRef: opts.seedRef, includeTests: opts.includeTests, budgetSeconds: 300, local: true });
+  });
+
 program.parseAsync(process.argv).catch((err) => {
   // Local CLI may fail loudly. The GitHub Action wrapper (Week 5) must NOT —
   // it catches everything and exits 0.

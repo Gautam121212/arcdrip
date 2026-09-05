@@ -66,3 +66,46 @@ npx tsx src/cli.ts watch replay \
 ```
 276 spec changes, 152 breaking, 2 alerts: `current_period_start` and `current_period_end` removed
 from `subscription`, read at `utils/supabase/admin.ts:228`.
+
+## GitHub Action (standalone mode)
+Runs the scanner and the watcher inside your CI. Nothing leaves it: the manifest is written to the
+runner's temp directory (never the workspace), the Stripe spec is fetched from Stripe's public
+repository, and alerts are reported with the workflow's own token as a **check run** (annotations on
+the affected lines) and **one issue per alert** (label `arcdrip`). Issues close themselves when the
+code stops depending on the changed field; close one manually to acknowledge it.
+
+Add `.github/workflows/arcdrip.yml`:
+
+```yaml
+name: arcdrip
+on:
+  schedule: [{ cron: "0 */6 * * *" }]
+  push: { branches: [main] }
+  workflow_dispatch:
+permissions:
+  contents: read
+  checks: write
+  issues: write
+jobs:
+  arcdrip:
+    runs-on: ubuntu-latest
+    continue-on-error: true      # arcdrip never blocks your pipeline
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: Gautam121212/arcdrip@main     # pin to a SHA once released
+```
+
+Optional inputs: `include_tests: "true"`, `budget_seconds: "300"`, and `seed_ref: <sha>` to use a
+historical Stripe spec as the first baseline (replay a known change on the first two runs).
+
+How alerts flow: the first run records a baseline snapshot; each later run fetches the latest spec
+(accepted when seen twice, ±20% operation band); when a newly accepted snapshot differs from the
+previous one and the difference touches this code, an alert opens. State persists in the Actions
+cache; if the cache is evicted, the next run re-baselines.
+
+Local dry run of the whole Action against any repo (no GitHub calls):
+```
+npx tsx src/cli.ts action ../some-repo --seed-ref 5a411d0d1e527229cdb4d6633197ab8009899ce6
+npx tsx src/cli.ts action ../some-repo        # second run: accepts the latest spec and reports
+```

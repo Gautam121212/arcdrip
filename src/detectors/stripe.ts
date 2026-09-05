@@ -29,8 +29,13 @@ const PKG = "stripe";
 
 const WEBHOOK_VERIFY = new Set(["webhooks.constructEvent", "webhooks.constructEventAsync"]);
 
-/** Import specifiers that name the Stripe SDK without going through node_modules (Deno, edge runtimes). */
-const SDK_SPECIFIER = /^(npm:stripe(@[^/]*)?|https:\/\/esm\.sh\/stripe(@[^/]*)?(\/.*)?|https:\/\/cdn\.skypack\.dev\/stripe(@[^/]*)?)$/;
+/**
+ * Import specifiers that name the Stripe SDK explicitly. Used when the type
+ * checker cannot resolve the package: Deno/edge specifiers, or a plain
+ * `import Stripe from "stripe"` in a repo scanned without node_modules
+ * (e.g. the Action running before the customer's install step).
+ */
+const SDK_SPECIFIER = /^(stripe|npm:stripe(@[^/]*)?|https:\/\/esm\.sh\/stripe(@[^/]*)?(\/.*)?|https:\/\/cdn\.skypack\.dev\/stripe(@[^/]*)?)$/;
 
 /** Raw HTTP: any string literal that names the API host. Tier 3 — provider known, operation not. */
 const API_HOST = "api.stripe.com";
@@ -129,7 +134,15 @@ function isClientFromSdkImport(root: Node): boolean {
     if (!init) return false;
     const inner = unwrapExpression(Node.isAwaitExpression(init) ? init.getExpression() : init);
     if (!Node.isNewExpression(inner)) return false;
-    const ctor = inner.getExpression();
+    return isSdkImportedCtor(inner.getExpression());
+  } catch {
+    return false;
+  }
+}
+
+/** `Stripe` in `new Stripe(...)` was imported from a specifier that names the SDK. */
+function isSdkImportedCtor(ctor: Node): boolean {
+  try {
     const ctorDecl = ctor.getSymbol()?.getDeclarations()[0];
     const importDecl = ctorDecl?.getFirstAncestor((a) => Node.isImportDeclaration(a));
     if (!importDecl || !Node.isImportDeclaration(importDecl)) return false;
@@ -144,7 +157,7 @@ function isClientFromSdkImport(root: Node): boolean {
 /** new Stripe(key, { apiVersion: "2024-06-20" }) */
 function findApiVersionPin(sf: SourceFile): string | null {
   for (const n of sf.getDescendantsOfKind(SyntaxKind.NewExpression)) {
-    if (!isDeclaredInPackage(n.getExpression(), PKG)) continue;
+    if (!isDeclaredInPackage(n.getExpression(), PKG) && !isSdkImportedCtor(n.getExpression())) continue;
     const opts = n.getArguments()[1];
     if (!opts || !Node.isObjectLiteralExpression(opts)) continue;
     const prop = opts.getProperty("apiVersion");
