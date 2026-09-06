@@ -15,7 +15,7 @@ import { join, resolve } from "node:path";
 import { scan } from "../scan.js";
 import { assertManifest, redactLocations, assertSafeToUpload, type Manifest } from "../manifest/schema.js";
 import { SnapshotStore } from "../watcher/store.js";
-import { STRIPE_SOURCE, fetchSpec } from "../watcher/sources.js";
+import { stripeSource, fetchSpec } from "../watcher/sources.js";
 import { buildModel } from "../watcher/openapi.js";
 import { diffModels } from "../watcher/diff.js";
 import { joinAlerts, type Alert } from "../watcher/join.js";
@@ -27,6 +27,8 @@ export interface ActionInputs {
   dataDir: string;
   /** seed the store with a historical spec ref as the baseline (first run only) */
   seedRef?: string;
+  /** owner/name of the repository to fetch the Stripe spec from (default stripe/openapi; a fork lets you test a change you control) */
+  specRepo?: string;
   includeTests: boolean;
   budgetSeconds: number;
   /** print instead of calling GitHub */
@@ -40,6 +42,7 @@ export function inputsFromEnv(env: NodeJS.ProcessEnv): ActionInputs {
     workspace: env.GITHUB_WORKSPACE ?? process.cwd(),
     dataDir: env.INPUT_DATA_DIR ?? join(env.RUNNER_TEMP ?? "/tmp", "arcdrip"),
     seedRef: env.INPUT_SEED_REF || undefined,
+    specRepo: env.INPUT_SPEC_REPO || undefined,
     includeTests: env.INPUT_INCLUDE_TESTS === "true",
     budgetSeconds: Number(env.INPUT_BUDGET_SECONDS || 300),
     local,
@@ -66,11 +69,13 @@ export async function runAction(inputs: ActionInputs, log: (s: string) => void =
 
   // 2. Snapshot the spec. Seed once if asked; otherwise fetch latest with the debounce.
   const store = new SnapshotStore(dataDir, "stripe");
+  const source = stripeSource(inputs.specRepo);
+  if (source.repo !== "stripe/openapi") log(`[arcdrip] spec source: ${source.repo} (override; not Stripe's repository)`);
   if (inputs.seedRef && store.accepted().length === 0) {
-    const r = store.ingest(await fetchSpec(STRIPE_SOURCE, inputs.seedRef), { ref: inputs.seedRef });
+    const r = store.ingest(await fetchSpec(source, inputs.seedRef), { ref: inputs.seedRef });
     log(`[arcdrip] seed ${inputs.seedRef}: ${r.status}${"snapshot" in r && r.snapshot ? ` ${r.snapshot.version}` : ""}`);
   }
-  const r = store.ingest(await fetchSpec(STRIPE_SOURCE));
+  const r = store.ingest(await fetchSpec(source));
   log(`[arcdrip] spec: ${r.status}${"reason" in r ? ` (${r.reason})` : ""}${"snapshot" in r && r.snapshot ? ` ${r.snapshot.version}` : ""}`);
 
   // 3. Alerts: diff the last two accepted snapshots, join, persist.

@@ -6,6 +6,7 @@ import { buildModel, eventToSchema, resolvePath } from "../src/watcher/openapi.j
 import { diffModels } from "../src/watcher/diff.js";
 import { joinAlerts, applicability } from "../src/watcher/join.js";
 import { SnapshotStore } from "../src/watcher/store.js";
+import { stripeSource } from "../src/watcher/sources.js";
 import type { Manifest } from "../src/manifest/schema.js";
 
 /** Minimal Stripe-shaped spec. Mutations of this drive the taxonomy tests. */
@@ -197,5 +198,14 @@ describe("snapshot store", () => {
     expect(store.ingest(raw(10, "v2")).status).toBe("pending");
     expect(store.ingest(raw(10, "v1")).status).toBe("pending");
     expect(store.ingest(raw(10, "v1")).status).toBe("accepted");
+  });
+});
+
+describe("spec source", () => {
+  it("defaults to Stripe's repository and accepts an owner/name override", () => {
+    expect(stripeSource().url("master")).toBe("https://raw.githubusercontent.com/stripe/openapi/master/openapi/spec3.json");
+    expect(stripeSource("someone/openapi").url("abc")).toBe("https://raw.githubusercontent.com/someone/openapi/abc/openapi/spec3.json");
+    expect(() => stripeSource("not a repo")).toThrow(/owner\/name/);
+    expect(() => stripeSource("../evil")).toThrow();
   });
 });

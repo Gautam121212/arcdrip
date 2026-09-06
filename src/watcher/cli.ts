@@ -3,7 +3,7 @@ import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { assertManifest } from "../manifest/schema.js";
 import { SnapshotStore } from "./store.js";
-import { STRIPE_SOURCE, fetchSpec } from "./sources.js";
+import { stripeSource, fetchSpec } from "./sources.js";
 import { buildModel } from "./openapi.js";
 import { diffModels } from "./diff.js";
 import { joinAlerts } from "./join.js";
@@ -18,10 +18,11 @@ export function registerWatch(program: Command): void {
     .command("fetch")
     .description("fetch the Stripe spec (latest, or at a git ref) into the snapshot store")
     .option("--data <dir>", "data directory", DEFAULT_DATA)
-    .option("--ref <ref>", "git ref in stripe/openapi (trusted; skips the two-fetch debounce)")
-    .action(async (opts: { data: string; ref?: string }) => {
+    .option("--ref <ref>", "git ref in the spec repo (trusted; skips the two-fetch debounce)")
+    .option("--spec-repo <owner/name>", "repository to fetch the spec from", "stripe/openapi")
+    .action(async (opts: { data: string; ref?: string; specRepo: string }) => {
       const store = new SnapshotStore(resolve(opts.data), "stripe");
-      const raw = await fetchSpec(STRIPE_SOURCE, opts.ref);
+      const raw = await fetchSpec(stripeSource(opts.specRepo), opts.ref);
       const r = store.ingest(raw, { ref: opts.ref });
       const v = "snapshot" in r && r.snapshot ? `${r.snapshot.hash} (${r.snapshot.version}, ${r.snapshot.operations} ops)` : "";
       console.log(`[watch] ${r.status}${"reason" in r ? `: ${r.reason}` : ""} ${v}`);
@@ -74,12 +75,13 @@ export function registerWatch(program: Command): void {
     .requiredOption("--to-ref <ref>")
     .requiredOption("--manifest <file>")
     .option("--data <dir>", "data directory", DEFAULT_DATA)
+    .option("--spec-repo <owner/name>", "repository to fetch the spec from", "stripe/openapi")
     .option("--json", "print alerts as JSON", false)
-    .action(async (opts: { fromRef: string; toRef: string; manifest: string; data: string; json: boolean }) => {
+    .action(async (opts: { fromRef: string; toRef: string; manifest: string; data: string; specRepo: string; json: boolean }) => {
       const store = new SnapshotStore(resolve(opts.data), "stripe");
       const snaps = [];
       for (const ref of [opts.fromRef, opts.toRef]) {
-        const r = store.ingest(await fetchSpec(STRIPE_SOURCE, ref), { ref });
+        const r = store.ingest(await fetchSpec(stripeSource(opts.specRepo), ref), { ref });
         if (!("snapshot" in r) || !r.snapshot) throw new Error(`could not ingest ${ref}: ${"reason" in r ? r.reason : r.status}`);
         console.error(`[watch] ${ref}: ${r.status} ${r.snapshot.hash} (${r.snapshot.version})`);
         snaps.push(r.snapshot.hash);

@@ -43,10 +43,11 @@ program
   .argument("[dir]", "repo root", ".")
   .option("--data <dir>", "data directory", ".arcdrip-action")
   .option("--seed-ref <ref>", "baseline spec ref for the first run")
+  .option("--spec-repo <owner/name>", "repository to fetch the spec from", "stripe/openapi")
   .option("--include-tests", "also scan test files", false)
-  .action(async (dir: string, opts: { data: string; seedRef?: string; includeTests: boolean }) => {
+  .action(async (dir: string, opts: { data: string; seedRef?: string; specRepo: string; includeTests: boolean }) => {
     const { runAction } = await import("./action/main.js");
-    await runAction({ workspace: dir, dataDir: opts.data, seedRef: opts.seedRef, includeTests: opts.includeTests, budgetSeconds: 300, local: true });
+    await runAction({ workspace: dir, dataDir: opts.data, seedRef: opts.seedRef, specRepo: opts.specRepo, includeTests: opts.includeTests, budgetSeconds: 300, local: true });
   });
 
 program.parseAsync(process.argv).catch((err) => {

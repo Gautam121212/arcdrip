@@ -96,8 +96,11 @@ jobs:
       - uses: Gautam121212/arcdrip@main     # pin to a SHA once released
 ```
 
-Optional inputs: `include_tests: "true"`, `budget_seconds: "300"`, and `seed_ref: <sha>` to use a
-historical Stripe spec as the first baseline (replay a known change on the first two runs).
+Optional inputs: `include_tests: "true"`, `budget_seconds: "300"`, `seed_ref: <sha>` to use a
+historical Stripe spec as the first baseline (replay a known change on the first two runs), and
+`spec_repo: <owner>/openapi` to fetch the spec from your own fork — delete a field your code reads,
+push, and watch the alert appear; that is the fastest way to see every state of the loop on code
+you control.
 
 How alerts flow: the first run records a baseline snapshot; each later run fetches the latest spec
 (accepted when seen twice, ±20% operation band); when a newly accepted snapshot differs from the
