@@ -6,7 +6,7 @@ import { buildModel, eventToSchema, resolvePath } from "../src/watcher/openapi.j
 import { diffModels } from "../src/watcher/diff.js";
 import { joinAlerts, applicability } from "../src/watcher/join.js";
 import { SnapshotStore } from "../src/watcher/store.js";
-import { stripeSource } from "../src/watcher/sources.js";
+import { stripeSource, resolveRef } from "../src/watcher/sources.js";
 import type { Manifest } from "../src/manifest/schema.js";
 
 /** Minimal Stripe-shaped spec. Mutations of this drive the taxonomy tests. */
@@ -207,5 +207,9 @@ describe("spec source", () => {
     expect(stripeSource("someone/openapi").url("abc")).toBe("https://raw.githubusercontent.com/someone/openapi/abc/openapi/spec3.json");
     expect(() => stripeSource("not a repo")).toThrow(/owner\/name/);
     expect(() => stripeSource("../evil")).toThrow();
+  });
+  it("a full SHA needs no resolution; anything else goes through the API", async () => {
+    const sha = "5a411d0d1e527229cdb4d6633197ab8009899ce6";
+    expect(await resolveRef(stripeSource(), sha)).toBe(sha);
   });
 });

@@ -13,8 +13,10 @@ export interface Snapshot {
   hash: string;
   version: string;
   fetched_at: string;
-  /** git ref the spec was fetched at, when explicit (replay); absent for "latest" */
+  /** commit the spec was fetched at (explicit ref, trusted) */
   ref?: string;
+  /** commit a "latest" fetch resolved to (informational; still subject to the debounce) */
+  at?: string;
   operations: number;
 }
 
@@ -70,8 +72,9 @@ export class SnapshotStore {
   /**
    * @param raw       spec text as fetched
    * @param opts.ref  explicit git ref; such a snapshot is trusted and skips the debounce
+   * @param opts.at   commit a "latest" fetch resolved to; recorded, but the debounce still applies
    */
-  ingest(raw: string, opts: { ref?: string; now?: Date } = {}): IngestResult {
+  ingest(raw: string, opts: { ref?: string; at?: string; now?: Date } = {}): IngestResult {
     const state = this.state();
     const hash = createHash("sha256").update(raw).digest("hex").slice(0, 16);
     const now = (opts.now ?? new Date()).toISOString();
@@ -84,7 +87,7 @@ export class SnapshotStore {
     }
     const operations = countOperations(parsed);
     const version = String(parsed?.info?.version ?? "unknown");
-    const snapshot: Snapshot = { hash, version, fetched_at: now, operations, ...(opts.ref ? { ref: opts.ref } : {}) };
+    const snapshot: Snapshot = { hash, version, fetched_at: now, operations, ...(opts.ref ? { ref: opts.ref } : {}), ...(opts.at ? { at: opts.at } : {}) };
 
     const existing = state.accepted.find((s) => s.hash === hash);
     if (existing) return { status: "unchanged", snapshot: existing };

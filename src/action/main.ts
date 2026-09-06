@@ -72,11 +72,13 @@ export async function runAction(inputs: ActionInputs, log: (s: string) => void =
   const source = stripeSource(inputs.specRepo);
   if (source.repo !== "stripe/openapi") log(`[arcdrip] spec source: ${source.repo} (override; not Stripe's repository)`);
   if (inputs.seedRef && store.accepted().length === 0) {
-    const r = store.ingest(await fetchSpec(source, inputs.seedRef), { ref: inputs.seedRef });
+    const seed = await fetchSpec(source, inputs.seedRef);
+    const r = store.ingest(seed.raw, { ref: seed.sha });
     log(`[arcdrip] seed ${inputs.seedRef}: ${r.status}${"snapshot" in r && r.snapshot ? ` ${r.snapshot.version}` : ""}`);
   }
-  const r = store.ingest(await fetchSpec(source));
-  log(`[arcdrip] spec: ${r.status}${"reason" in r ? ` (${r.reason})` : ""}${"snapshot" in r && r.snapshot ? ` ${r.snapshot.version}` : ""}`);
+  const latest = await fetchSpec(source);
+  const r = store.ingest(latest.raw, { at: latest.sha });
+  log(`[arcdrip] spec: ${r.status}${"reason" in r ? ` (${r.reason})` : ""}${"snapshot" in r && r.snapshot ? ` ${r.snapshot.version}` : ""} @ ${latest.sha.slice(0, 12)}`);
 
   // 3. Alerts: diff the last two accepted snapshots, join, persist.
   const accepted = store.accepted();
