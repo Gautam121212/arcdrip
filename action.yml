@@ -7,6 +7,10 @@ inputs:
     description: Optional git ref in stripe/openapi to use as the baseline spec on the first run (for replaying a known change). Leave empty in normal use.
     required: false
     default: ""
+  spec_repo:
+    description: Repository to fetch the Stripe OpenAPI document from, as owner/name. Default stripe/openapi. Point it at your own fork to test against a change you control.
+    required: false
+    default: "stripe/openapi"
   include_tests:
     description: Also scan test files. Off by default.
     required: false
@@ -39,6 +43,7 @@ runs:
       env:
         GITHUB_TOKEN: ${{ github.token }}
         INPUT_SEED_REF: ${{ inputs.seed_ref }}
+        INPUT_SPEC_REPO: ${{ inputs.spec_repo }}
         INPUT_INCLUDE_TESTS: ${{ inputs.include_tests }}
         INPUT_BUDGET_SECONDS: ${{ inputs.budget_seconds }}
       run: cd "${{ github.action_path }}" && npx tsx src/action/main.ts
