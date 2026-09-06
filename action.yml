@@ -23,12 +23,12 @@ inputs:
 runs:
   using: composite
   steps:
-    - uses: actions/setup-node@v4
+    - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
       with: { node-version: 22 }
 
     # Snapshots + alert state persist between runs. Best-effort: if the cache is
     # evicted, the next run re-baselines and alerts resume on the following change.
-    - uses: actions/cache@v4
+    - uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
       with:
         path: ${{ runner.temp }}/arcdrip
         key: arcdrip-stripe-${{ github.repository }}-${{ github.run_id }}
