@@ -128,7 +128,11 @@ function scanFile(sf: SourceFile, rootDir: string, entries: Map<string, Entry>, 
  */
 function isClientFromSdkImport(root: Node): boolean {
   try {
-    const decl = root.getSymbol()?.getDeclarations().find((d) => Node.isVariableDeclaration(d));
+    // `import { stripe } from "./config"` — the local symbol is an alias; follow it to
+    // the real declaration in the other file.
+    let sym = root.getSymbol();
+    if (sym?.isAlias()) sym = sym.getAliasedSymbol() ?? sym;
+    const decl = sym?.getDeclarations().find((d) => Node.isVariableDeclaration(d));
     if (!decl || !Node.isVariableDeclaration(decl)) return false;
     const init = decl.getInitializer();
     if (!init) return false;
