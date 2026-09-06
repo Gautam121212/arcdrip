@@ -22,8 +22,8 @@ export function registerWatch(program: Command): void {
     .option("--spec-repo <owner/name>", "repository to fetch the spec from", "stripe/openapi")
     .action(async (opts: { data: string; ref?: string; specRepo: string }) => {
       const store = new SnapshotStore(resolve(opts.data), "stripe");
-      const raw = await fetchSpec(stripeSource(opts.specRepo), opts.ref);
-      const r = store.ingest(raw, { ref: opts.ref });
+      const fetched = await fetchSpec(stripeSource(opts.specRepo), opts.ref);
+      const r = store.ingest(fetched.raw, opts.ref ? { ref: fetched.sha } : { at: fetched.sha });
       const v = "snapshot" in r && r.snapshot ? `${r.snapshot.hash} (${r.snapshot.version}, ${r.snapshot.operations} ops)` : "";
       console.log(`[watch] ${r.status}${"reason" in r ? `: ${r.reason}` : ""} ${v}`);
     });
@@ -81,7 +81,8 @@ export function registerWatch(program: Command): void {
       const store = new SnapshotStore(resolve(opts.data), "stripe");
       const snaps = [];
       for (const ref of [opts.fromRef, opts.toRef]) {
-        const r = store.ingest(await fetchSpec(stripeSource(opts.specRepo), ref), { ref });
+        const fetched = await fetchSpec(stripeSource(opts.specRepo), ref);
+        const r = store.ingest(fetched.raw, { ref: fetched.sha });
         if (!("snapshot" in r) || !r.snapshot) throw new Error(`could not ingest ${ref}: ${"reason" in r ? r.reason : r.status}`);
         console.error(`[watch] ${ref}: ${r.status} ${r.snapshot.hash} (${r.snapshot.version})`);
         snaps.push(r.snapshot.hash);
